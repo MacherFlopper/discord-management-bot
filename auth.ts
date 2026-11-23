@@ -14,6 +14,8 @@ const sessionLifetime = 8 * 60 * 60 * 1000;
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Discord({
+      issuer: "https://discord.com",
+      checks: ["state", "pkce"],
       authorization: {
         params: { scope: "identify guilds" },
       },
