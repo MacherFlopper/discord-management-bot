@@ -128,6 +128,20 @@ const ticketPanelCommand = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
   .addStringOption((option) => option.setName("panel_id").setDescription("Panel-ID aus dem Dashboard").setRequired(true));
 
+const syncCommand = new SlashCommandBuilder()
+  .setName("sync")
+  .setDescription("Synchronisiert Serverdaten und Slash-Commands")
+  .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild);
+
+const serverInfoCommand = new SlashCommandBuilder()
+  .setName("serverinfo")
+  .setDescription("Zeigt Informationen über diesen Discord-Server");
+
+const userInfoCommand = new SlashCommandBuilder()
+  .setName("userinfo")
+  .setDescription("Zeigt Informationen über einen Benutzer")
+  .addUserOption((option) => option.setName("benutzer").setDescription("Discord-Benutzer").setRequired(false));
+
 async function syncApplicationCommands(guild: Guild) {
   const commands = await guild.commands.fetch();
   const legacyClanCommand = commands.find((command) =>
@@ -135,7 +149,7 @@ async function syncApplicationCommands(guild: Guild) {
   );
   if (legacyClanCommand) await guild.commands.delete(legacyClanCommand.id);
 
-  for (const commandData of [clanCommand.toJSON(), ticketPanelCommand.toJSON()]) {
+  for (const commandData of [clanCommand.toJSON(), ticketPanelCommand.toJSON(), syncCommand.toJSON(), serverInfoCommand.toJSON(), userInfoCommand.toJSON()]) {
     const existing = commands.find((command) => command.name === commandData.name);
     if (!existing) {
       await guild.commands.create(commandData);
@@ -318,9 +332,53 @@ async function handleTicketButton(interaction: ButtonInteraction) {
   await interaction.reply({ content: "Ticket geschlossen.", ephemeral: true });
 }
 
+async function handleSyncCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guildId || !interaction.guild) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
+  await interaction.deferReply({ ephemeral: true });
+  await syncGuild(interaction.guildId);
+  await syncApplicationCommands(interaction.guild);
+  await interaction.editReply("Serverdaten und Slash-Commands wurden synchronisiert.");
+}
+
+async function handleServerInfoCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guild) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
+  const owner = await interaction.guild.fetchOwner();
+  const embed = new EmbedBuilder()
+    .setColor(0x8057e8)
+    .setTitle(interaction.guild.name)
+    .setThumbnail(interaction.guild.iconURL({ size: 128 }))
+    .addFields(
+      { name: "Server-ID", value: interaction.guild.id, inline: true },
+      { name: "Owner", value: `${owner.user.tag} (${owner.id})`, inline: true },
+      { name: "Mitglieder", value: String(interaction.guild.memberCount), inline: true },
+      { name: "Erstellt", value: `<t:${Math.floor(interaction.guild.createdTimestamp / 1000)}:R>`, inline: true },
+    );
+  await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+async function handleUserInfoCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guild) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
+  const user = interaction.options.getUser("benutzer") || interaction.user;
+  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+  const embed = new EmbedBuilder()
+    .setColor(0x8057e8)
+    .setTitle(user.tag)
+    .setThumbnail(user.displayAvatarURL({ size: 128 }))
+    .addFields(
+      { name: "User-ID", value: user.id, inline: true },
+      { name: "Bot", value: user.bot ? "Ja" : "Nein", inline: true },
+      { name: "Discord beigetreten", value: `<t:${Math.floor(user.createdTimestamp / 1000)}:R>`, inline: true },
+      { name: "Server beigetreten", value: member?.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : "Unbekannt", inline: true },
+    );
+  await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
 async function handleChatCommand(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName === "clan") return handleClanCommand(interaction);
   if (interaction.commandName === "ticketpanel") return handleTicketPanelCommand(interaction);
+  if (interaction.commandName === "sync") return handleSyncCommand(interaction);
+  if (interaction.commandName === "serverinfo") return handleServerInfoCommand(interaction);
+  if (interaction.commandName === "userinfo") return handleUserInfoCommand(interaction);
 }
 
 client.once("clientReady", async () => {
@@ -342,10 +400,10 @@ client.on("guildCreate", (guild) => {
   syncApplicationCommands(guild).catch((error) => console.error(`Discord-Befehle konnten nicht synchronisiert werden (${guild.id}):`, error));
 });
 client.on("interactionCreate", async (interaction) => {
-  const isClanCommand = interaction.isChatInputCommand() && interaction.commandName === "clan";
-  const isTicketPanelCommand = interaction.isChatInputCommand() && interaction.commandName === "ticketpanel";
+  const toolCommands = ["clan", "ticketpanel", "sync", "serverinfo", "userinfo"];
+  const isToolCommand = interaction.isChatInputCommand() && toolCommands.includes(interaction.commandName);
   const isTicketButton = interaction.isButton() && interaction.customId.startsWith("ticket:");
-  if (!isClanCommand && !isTicketPanelCommand && !isTicketButton) return;
+  if (!isToolCommand && !isTicketButton) return;
   try {
     if (interaction.isButton()) await handleTicketButton(interaction);
     else if (interaction.isChatInputCommand()) await handleChatCommand(interaction);

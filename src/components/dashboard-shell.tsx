@@ -3,7 +3,7 @@
 import Link from "next/link";
 import {
   Activity, Bell, Bot, ChevronDown, ChevronLeft, ChevronRight,
-  CircleGauge, Command, Hash, LayoutDashboard, Menu, Settings,
+  CircleGauge, Command, Hash, LayoutDashboard, Menu, Settings, Wrench,
   ShieldCheck, Swords, Ticket, Users, X,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
@@ -29,6 +29,7 @@ const groups = [
     { label: "Moderation", href: "/moderation", icon: ShieldCheck },
   ]},
   { title: "BOT SYSTEM", items: [
+    { label: "Werkzeuge", href: "/tools", icon: Wrench },
     { label: "Bot Status", href: "/bot-status", icon: Bot },
     { label: "Commands", href: "/commands", icon: Command },
     { label: "Einstellungen", href: "/settings", icon: Settings },

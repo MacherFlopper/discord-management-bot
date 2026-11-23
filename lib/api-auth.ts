@@ -7,11 +7,21 @@ type Authorization =
 
 function isSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  const expectedOrigin = process.env.AUTH_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!origin || !expectedOrigin) return false;
+  if (!origin) return false;
 
   try {
-    return new URL(origin).origin === new URL(expectedOrigin).origin;
+    const requestOrigin = new URL(request.url).origin;
+    const forwardedHost = request.headers.get("x-forwarded-host")?.split(",", 1)[0]?.trim();
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim() || "https";
+    const forwardedOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
+    const configuredOrigins = [
+      requestOrigin,
+      forwardedOrigin,
+      process.env.AUTH_URL,
+      process.env.NEXT_PUBLIC_APP_URL,
+    ].filter((value): value is string => Boolean(value)).map((value) => new URL(value).origin);
+
+    return configuredOrigins.includes(new URL(origin).origin);
   } catch {
     return false;
   }
