@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
   title: "Discord Control Hub",
@@ -14,7 +15,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className="h-full antialiased"
     >
       <body className="min-h-full">
-        <DashboardShell>{children}</DashboardShell>
+        <Providers>
+          <DashboardShell>{children}</DashboardShell>
+        </Providers>
       </body>
     </html>
   );

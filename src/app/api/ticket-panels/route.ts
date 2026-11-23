@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { authorizeDashboardRequest } from "../../../../lib/api-auth";
 import { getDb } from "../../../../lib/db";
 
 export async function GET(request: Request) {
   const guildId = new URL(request.url).searchParams.get("guildId");
+  const authorization = await authorizeDashboardRequest(request, guildId);
+  if (!authorization.ok) return authorization.response;
   if (!guildId) return NextResponse.json([]);
   const panels = getDb().prepare(`
     SELECT ticket_panels.*, panel_channels.name AS panel_channel_name,
@@ -20,6 +23,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authorization = await authorizeDashboardRequest(request);
+  if (!authorization.ok) return authorization.response;
   try {
     const body = await request.json() as Record<string, unknown>;
     const guildId = typeof body.guildId === "string" ? body.guildId : "";
@@ -32,6 +37,9 @@ export async function POST(request: Request) {
     const buttonLabel = typeof body.buttonLabel === "string" ? body.buttonLabel.trim() : "Ticket erstellen";
     if (!guildId || name.length < 2 || name.length > 50 || !title || title.length > 100 || description.length > 1500 || !panelChannelId || buttonLabel.length < 1 || buttonLabel.length > 80) {
       return NextResponse.json({ error: "Bitte prüfe Name, Titel, Beschreibung, Ziel-Channel und Button-Text." }, { status: 400 });
+    }
+    if (!authorization.guildIds.includes(guildId)) {
+      return NextResponse.json({ error: "Keine Berechtigung für diesen Discord-Server." }, { status: 403 });
     }
 
     const db = getDb();

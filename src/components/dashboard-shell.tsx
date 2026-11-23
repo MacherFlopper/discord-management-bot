@@ -6,6 +6,7 @@ import {
   CircleGauge, Command, Hash, LayoutDashboard, Menu, Settings,
   ShieldCheck, Swords, Ticket, Users, X,
 } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
 import { useState, type ReactNode } from "react";
 
 const groups = [
@@ -37,6 +38,12 @@ const groups = [
 export function DashboardShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { data: session, status } = useSession();
+
+  if (status === "loading") {
+    return <div className="grid min-h-screen place-items-center bg-[#090b10] text-sm text-slate-400">Sitzung wird geprüft...</div>;
+  }
+  if (status === "unauthenticated") return children;
 
   return (
     <div className="min-h-screen bg-[#090b10] text-slate-100">
@@ -83,8 +90,16 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           </button>
           <div className="ml-auto flex items-center gap-2">
             <button className="relative grid h-9 w-9 place-items-center rounded-lg border border-white/[0.07] text-slate-400 hover:bg-white/[0.04]"><Bell size={17} /><span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-violet-500" /></button>
-            <button className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.07] px-2 text-sm">
-              <span className="grid h-6 w-6 place-items-center rounded-md bg-slate-700 text-[10px]">?</span><ChevronDown size={14} className="hidden text-slate-500 sm:block" />
+            <button
+              className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.07] px-2 text-sm hover:bg-white/[0.04]"
+              onClick={() => signOut({ redirectTo: "/login" })}
+              title="Abmelden"
+            >
+              <span className="grid h-6 w-6 place-items-center rounded-md bg-violet-700 text-[10px] font-semibold">
+                {(session?.user?.name || "DC").slice(0, 2).toUpperCase()}
+              </span>
+              <span className="hidden max-w-32 truncate sm:block">{session?.user?.name || "Discord-Nutzer"}</span>
+              <ChevronDown size={14} className="hidden text-slate-500 sm:block" />
             </button>
           </div>
         </header>

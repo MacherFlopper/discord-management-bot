@@ -4,9 +4,12 @@ Discord.js bot and responsive Next.js dashboard backed by SQLite.
 
 ## Start locally
 
-1. Copy `.env.example` to `.env.local` and set `DISCORD_TOKEN`.
-2. Run the dashboard with `npm run dev`.
-3. Run the bot in a second terminal with `npm run bot`.
+1. Copy `.env.example` to `.env.local`.
+2. Set `AUTH_DISCORD_ID`, `AUTH_DISCORD_SECRET`, and `AUTH_SECRET`. Create an OAuth application in the Discord Developer Portal, enable the `identify` and `guilds` scopes, and add this redirect URL: `http://localhost:3000/api/auth/callback/discord`.
+   Generate `AUTH_SECRET` with `openssl rand -base64 32`.
+3. Set `DISCORD_TOKEN` for the bot.
+4. Run the dashboard with `npm run dev`.
+5. Run the bot in a second terminal with `npm run bot`.
 
 The bot needs the Server Members intent for member synchronization and these Discord permissions:
 
@@ -28,4 +31,8 @@ The settings page stores a welcome channel and message per server. Supported pla
 
 ## Security
 
-This local dashboard does not yet include Discord OAuth2 or dashboard authorization. Do not expose it publicly until authentication and authorization have been added. Keep `.env.local` private; bot tokens must never be committed.
+The dashboard requires Discord OAuth2 sign-in. Only Discord servers where the signed-in user is the owner or has Administrator/Manage Server permission are available, and every API request enforces that check server-side. Sessions expire after eight hours. Mutating API requests also require a same-origin `Origin` header.
+
+For deployment, use HTTPS, set `AUTH_URL` and `NEXT_PUBLIC_APP_URL` to the public dashboard origin, and configure the identical OAuth callback URL (`https://your-domain/api/auth/callback/discord`) in the Discord Developer Portal. Keep all secrets in the host's environment-variable settings; never commit `.env.local`, `AUTH_SECRET`, OAuth credentials, or the bot token.
+
+Authentication does not make the current SQLite deployment suitable for multiple or ephemeral hosting instances. Move the database to persistent shared storage (preferably PostgreSQL) and run the bot as a separate persistent worker before scaling or using serverless hosting.

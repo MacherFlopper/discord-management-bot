@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeDashboardRequest } from "../../../../lib/api-auth";
 import { hasClanRestrictedPermissions } from "../../../../lib/discord-permissions";
 import { getDb } from "../../../../lib/db";
 
@@ -16,6 +17,10 @@ type ClanRoleRow = {
 
 export async function GET(request: Request) {
   const guildId = new URL(request.url).searchParams.get("guildId");
+  const authorization = await authorizeDashboardRequest(request, guildId);
+  if (!authorization.ok) return authorization.response;
+  if (!guildId && !authorization.guildIds.length) return NextResponse.json([]);
+  const placeholders = authorization.guildIds.map(() => "?").join(",");
   const db = getDb();
   const rows = (guildId
     ? db.prepare(`
@@ -33,11 +38,12 @@ export async function GET(request: Request) {
         FROM clan_roles
         JOIN guilds ON guilds.id = clan_roles.guild_id
         JOIN roles ON roles.guild_id = clan_roles.guild_id AND roles.id = clan_roles.role_id
+        WHERE clan_roles.guild_id IN (${placeholders})
         ORDER BY guild_name, roles.position DESC
-      `).all()) as ClanRoleRow[];
+      `).all(...authorization.guildIds)) as ClanRoleRow[];
   const members = (guildId
     ? db.prepare("SELECT guild_id, id, roles_json FROM members WHERE guild_id = ?").all(guildId)
-    : db.prepare("SELECT guild_id, id, roles_json FROM members").all()) as { guild_id: string; id: string; roles_json: string }[];
+    : db.prepare(`SELECT guild_id, id, roles_json FROM members WHERE guild_id IN (${placeholders})`).all(...authorization.guildIds)) as { guild_id: string; id: string; roles_json: string }[];
 
   const counts = new Map<string, number>();
   for (const member of members) {
@@ -61,10 +67,15 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authorization = await authorizeDashboardRequest(request);
+  if (!authorization.ok) return authorization.response;
   try {
     const body = await request.json() as { guildId?: unknown; roleId?: unknown };
     if (typeof body.guildId !== "string" || typeof body.roleId !== "string") {
       return NextResponse.json({ error: "Server und Rolle müssen ausgewählt werden." }, { status: 400 });
+    }
+    if (!authorization.guildIds.includes(body.guildId)) {
+      return NextResponse.json({ error: "Keine Berechtigung für diesen Discord-Server." }, { status: 403 });
     }
     const db = getDb();
     const role = db.prepare("SELECT id, name, managed, permissions FROM roles WHERE guild_id = ? AND id = ?").get(body.guildId, body.roleId) as

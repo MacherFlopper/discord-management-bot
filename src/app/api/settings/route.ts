@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { authorizeDashboardRequest } from "../../../../lib/api-auth";
 import { getDb } from "../../../../lib/db";
 
 export async function GET(request: Request) {
   const guildId = new URL(request.url).searchParams.get("guildId");
+  const authorization = await authorizeDashboardRequest(request, guildId);
+  if (!authorization.ok) return authorization.response;
   if (!guildId) return NextResponse.json({ error: "Server-ID fehlt." }, { status: 400 });
   const db = getDb();
   const settings = db.prepare("SELECT * FROM settings WHERE guild_id = ?").get(guildId);
@@ -15,10 +18,15 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  const authorization = await authorizeDashboardRequest(request);
+  if (!authorization.ok) return authorization.response;
   try {
     const body = await request.json() as { guildId?: unknown; welcomeChannelId?: unknown; welcomeMessage?: unknown };
     if (typeof body.guildId !== "string" || !body.guildId) {
       return NextResponse.json({ error: "Server-ID fehlt." }, { status: 400 });
+    }
+    if (!authorization.guildIds.includes(body.guildId)) {
+      return NextResponse.json({ error: "Keine Berechtigung für diesen Discord-Server." }, { status: 403 });
     }
     const welcomeChannelId = typeof body.welcomeChannelId === "string" && body.welcomeChannelId ? body.welcomeChannelId : null;
     const welcomeMessage = typeof body.welcomeMessage === "string" ? body.welcomeMessage.trim() : "";

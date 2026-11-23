@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeDashboardRequest } from "../../../../../../lib/api-auth";
 import { getDb } from "../../../../../../lib/db";
 
 type RouteContext = { params: Promise<{ clanId: string }> };
@@ -6,6 +7,8 @@ type RouteContext = { params: Promise<{ clanId: string }> };
 export async function GET(request: Request, { params }: RouteContext) {
   const { clanId: roleId } = await params;
   const guildId = new URL(request.url).searchParams.get("guildId");
+  const authorization = await authorizeDashboardRequest(request, guildId);
+  if (!authorization.ok) return authorization.response;
   if (!guildId) return NextResponse.json({ error: "Server-ID fehlt." }, { status: 400 });
 
   const db = getDb();
