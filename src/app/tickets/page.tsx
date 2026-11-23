@@ -21,6 +21,7 @@ type Panel = {
   support_role_id: string | null;
   support_role_name: string | null;
   button_label: string;
+  panel_config_json?: string;
 };
 type TicketRow = {
   id: string;
@@ -37,6 +38,14 @@ type TicketRow = {
 
 const fieldClass = "h-11 w-full rounded-lg border border-white/[0.08] bg-[#0b0e14] px-3 text-sm text-slate-100 outline-none transition focus:border-violet-500/60";
 
+const ticketPresets = [
+  { id: "support", label: "Support", style: "primary" },
+  { id: "application", label: "Bewerbung", style: "secondary" },
+  { id: "spawner", label: "Spawner", style: "success" },
+  { id: "purchase", label: "Kauf / Bestellung", style: "secondary" },
+  { id: "report", label: "Meldung", style: "danger" },
+];
+
 export default function TicketsPage() {
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [guildId, setGuildId] = useState("");
@@ -49,6 +58,8 @@ export default function TicketsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ name: "", title: "", description: "", panelChannelId: "", ticketCategoryId: "", supportRoleId: "", buttonLabel: "Ticket erstellen" });
+  const [panelOptions, setPanelOptions] = useState([{ id: "support", label: "Support", style: "primary" }]);
+  const [questionsText, setQuestionsText] = useState("");
   const textChannels = useMemo(() => channels.filter((channel) => channel.type === 0 || channel.type === 5), [channels]);
   const categories = useMemo(() => channels.filter((channel) => channel.type === 4), [channels]);
 
@@ -100,12 +111,19 @@ export default function TicketsPage() {
       const response = await fetch("/api/ticket-panels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guildId, ...form }),
+        body: JSON.stringify({
+          guildId,
+          ...form,
+          panelOptions,
+          questions: questionsText.split("\n").map((value) => value.trim()).filter(Boolean).slice(0, 5).map((label, index) => ({ id: `question_${index + 1}`, label, required: true })),
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Ticket-Panel konnte nicht erstellt werden.");
       setNotice(`Panel wurde angelegt. ID: ${data.id}`);
       setForm({ name: "", title: "", description: "", panelChannelId: textChannels[0]?.id || "", ticketCategoryId: "", supportRoleId: "", buttonLabel: "Ticket erstellen" });
+      setQuestionsText("");
+      setPanelOptions([{ id: "support", label: "Support", style: "primary" }]);
       setCreating(false);
       await refresh();
     } catch (cause) {
@@ -131,6 +149,22 @@ export default function TicketsPage() {
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Ticket konnte nicht aktualisiert werden.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function publishPanel(panel: Panel) {
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/ticket-panels/${panel.id}?guildId=${encodeURIComponent(guildId)}&publish=1`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Ticket-Panel konnte nicht veröffentlicht werden.");
+      setNotice(`Panel „${panel.name}“ wurde in Discord veröffentlicht.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Ticket-Panel konnte nicht veröffentlicht werden.");
     } finally {
       setSaving(false);
     }
@@ -186,6 +220,25 @@ export default function TicketsPage() {
             <label className="space-y-1.5 text-xs text-slate-400">Panel-Channel<select required className={fieldClass} value={form.panelChannelId} onChange={(event) => setForm({ ...form, panelChannelId: event.target.value })}><option value="">Channel auswählen</option>{textChannels.map((channel) => <option key={channel.id} value={channel.id}>#{channel.name}</option>)}</select></label>
             <label className="space-y-1.5 text-xs text-slate-400">Ticket-Kategorie<select className={fieldClass} value={form.ticketCategoryId} onChange={(event) => setForm({ ...form, ticketCategoryId: event.target.value })}><option value="">Keine Kategorie</option>{categories.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
             <label className="space-y-1.5 text-xs text-slate-400">Support-Rolle<select className={fieldClass} value={form.supportRoleId} onChange={(event) => setForm({ ...form, supportRoleId: event.target.value })}><option value="">Keine Support-Rolle</option>{roles.filter((role) => role.name !== "@everyone" && !role.managed).map((role) => <option key={role.id} value={role.id}>@{role.name}</option>)}</select></label>
+            <fieldset className="space-y-2 text-xs text-slate-400 sm:col-span-2 lg:col-span-3">
+              <legend>Ticket-Buttons</legend>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                {ticketPresets.map((preset) => {
+                  const selected = panelOptions.some((option) => option.id === preset.id);
+                  return (
+                    <label key={preset.id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-3 ${selected ? "border-cyan-400/40 bg-cyan-400/[0.08] text-cyan-100" : "border-white/[0.07] bg-[#0b0e14] text-slate-400"}`}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(event) => setPanelOptions((current) => event.target.checked ? [...current, preset] : current.filter((option) => option.id !== preset.id))}
+                      />
+                      {preset.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <label className="space-y-1.5 text-xs text-slate-400 sm:col-span-2 lg:col-span-3">Optional: Fragen vor Ticket-Eröffnung<textarea rows={4} className={`${fieldClass} h-auto py-3`} value={questionsText} onChange={(event) => setQuestionsText(event.target.value)} placeholder={"Eine Frage pro Zeile, zum Beispiel:\nWelcher Spawner-Typ wird benötigt?\nWelche Menge wird gewünscht?\nWarum möchtest du dich bewerben?"} /></label>
             <label className="space-y-1.5 text-xs text-slate-400 sm:col-span-2 lg:col-span-3">Beschreibung<textarea maxLength={1500} rows={3} className={`${fieldClass} h-auto py-3`} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Beschreibe, wann Nutzer dieses Panel verwenden sollen." /></label>
           </div>
           <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setCreating(false)} className="h-10 rounded-lg border border-white/[0.08] px-4 text-sm text-slate-400 hover:bg-white/[0.04]">Abbrechen</button><button disabled={saving || !textChannels.length} className="inline-flex h-10 items-center gap-2 rounded-lg bg-cyan-500 px-4 text-sm font-medium text-slate-950 hover:bg-cyan-400 disabled:opacity-50">{saving && <LoaderCircle size={15} className="animate-spin" />} Panel speichern</button></div>
@@ -194,7 +247,7 @@ export default function TicketsPage() {
 
       <section className="rounded-2xl border border-white/[0.06] bg-[#11151d]">
         <div className="border-b border-white/[0.06] p-5"><h2 className="font-semibold text-white">Deine Panels</h2><p className="mt-1 text-xs text-slate-500">Veröffentliche jedes Panel mit <code>/ticketpanel panel_id:…</code>. Der Bot muss „Channels verwalten“ besitzen.</p></div>
-        {panels.length ? <div className="grid gap-3 p-4 lg:grid-cols-2">{panels.map((panel) => <article key={panel.id} className="rounded-xl border border-white/[0.06] bg-[#0d1017] p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-semibold tracking-widest text-cyan-300">{panel.name}</p><h3 className="mt-1 font-medium text-white">{panel.title}</h3><p className="mt-2 line-clamp-2 text-sm text-slate-500">{panel.description || "Keine Beschreibung."}</p></div><button onClick={() => void deletePanel(panel)} aria-label={`${panel.name} löschen`} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-600 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 size={15} /></button></div><div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500"><span className="rounded-md bg-white/[0.04] px-2 py-1">#{panel.panel_channel_name || panel.panel_channel_id}</span>{panel.ticket_category_name && <span className="rounded-md bg-white/[0.04] px-2 py-1">{panel.ticket_category_name}</span>}{panel.support_role_name && <span className="rounded-md bg-white/[0.04] px-2 py-1">@{panel.support_role_name}</span>}</div><div className="mt-4 flex items-center justify-between border-t border-white/[0.05] pt-3"><code className="truncate text-[10px] text-slate-600">{panel.id}</code><button onClick={() => void copyCommand(panel.id)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-cyan-300 hover:bg-cyan-300/10"><Copy size={13} /> Befehl kopieren</button></div></article>)}</div> : <div className="px-6 py-10 text-center text-sm text-slate-500">Noch keine Ticket-Panels konfiguriert.</div>}
+        {panels.length ? <div className="grid gap-3 p-4 lg:grid-cols-2">{panels.map((panel) => <article key={panel.id} className="rounded-xl border border-white/[0.06] bg-[#0d1017] p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-semibold tracking-widest text-cyan-300">{panel.name}</p><h3 className="mt-1 font-medium text-white">{panel.title}</h3><p className="mt-2 line-clamp-2 text-sm text-slate-500">{panel.description || "Keine Beschreibung."}</p></div><button onClick={() => void deletePanel(panel)} aria-label={`${panel.name} löschen`} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-600 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 size={15} /></button></div><div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500"><span className="rounded-md bg-white/[0.04] px-2 py-1">#{panel.panel_channel_name || panel.panel_channel_id}</span>{panel.ticket_category_name && <span className="rounded-md bg-white/[0.04] px-2 py-1">{panel.ticket_category_name}</span>}{panel.support_role_name && <span className="rounded-md bg-white/[0.04] px-2 py-1">@{panel.support_role_name}</span>}</div><div className="mt-4 flex items-center justify-between border-t border-white/[0.05] pt-3"><code className="truncate text-[10px] text-slate-600">{panel.id}</code><button onClick={() => void publishPanel(panel)} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-emerald-300 hover:bg-emerald-300/10 disabled:opacity-50"><Send size={13} /> Veröffentlichen</button><button onClick={() => void copyCommand(panel.id)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-cyan-300 hover:bg-cyan-300/10"><Copy size={13} /> Befehl kopieren</button></div></article>)}</div> : <div className="px-6 py-10 text-center text-sm text-slate-500">Noch keine Ticket-Panels konfiguriert.</div>}
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#11151d]">

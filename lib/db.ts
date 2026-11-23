@@ -153,6 +153,7 @@ export function getDb() {
       ticket_category_id TEXT,
       support_role_id TEXT,
       button_label TEXT NOT NULL DEFAULT 'Ticket erstellen',
+      panel_config_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
     );
@@ -175,6 +176,11 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets(guild_id, status);
     CREATE INDEX IF NOT EXISTS idx_logs_guild_created ON logs(guild_id, created_at);
   `);
+
+  const panelColumns = db.prepare("PRAGMA table_info(ticket_panels)").all() as { name: string }[];
+  if (!panelColumns.some((column) => column.name === "panel_config_json")) {
+    db.exec("ALTER TABLE ticket_panels ADD COLUMN panel_config_json TEXT NOT NULL DEFAULT '{}'");
+  }
 
   const ticketColumns = db.prepare("PRAGMA table_info(tickets)").all() as { name: string }[];
   if (!ticketColumns.some((column) => column.name === "panel_id")) {

@@ -3,8 +3,10 @@ import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, Client, EmbedBuilder,
-  GatewayIntentBits, Partials, PermissionsBitField, SlashCommandBuilder,
+  GatewayIntentBits, ModalBuilder, Partials, PermissionsBitField, SlashCommandBuilder,
+  TextInputBuilder, TextInputStyle,
   type ButtonInteraction, type ChatInputCommandInteraction, type Guild,
+  type ModalSubmitInteraction,
 } from "discord.js";
 import { getDb } from "../lib/db";
 import { randomUUID } from "node:crypto";
@@ -251,11 +253,20 @@ async function handleTicketPanelCommand(interaction: ChatInputCommandInteraction
   if (!channel || !channel.isTextBased() || !("send" in channel)) {
     throw new Error("Der konfigurierte Panel-Channel ist nicht verfügbar.");
   }
+  let config: { panelOptions?: { id: string; label: string; style: string }[] } = {};
+  try { config = JSON.parse((panel as { panel_config_json?: string }).panel_config_json || "{}"); } catch { config = {}; }
+  const panelOptions = config.panelOptions?.length
+    ? config.panelOptions
+    : [{ id: "support", label: panel.button_label, style: "primary" }];
+  const styles = { primary: ButtonStyle.Primary, secondary: ButtonStyle.Secondary, success: ButtonStyle.Success, danger: ButtonStyle.Danger };
   const message = await channel.send({
     embeds: [new EmbedBuilder().setColor(0x8057e8).setTitle(panel.title).setDescription(panel.description || `Erstelle ein Ticket für **${panel.name}**.`)],
-    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`ticket:open:${panel.id}`).setLabel(panel.button_label).setStyle(ButtonStyle.Primary),
-    )],
+    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(...panelOptions.slice(0, 5).map((option) =>
+      new ButtonBuilder()
+        .setCustomId(`ticket:open:${panel.id}:${option.id}`)
+        .setLabel(option.label.slice(0, 80))
+        .setStyle(styles[option.style as keyof typeof styles] || ButtonStyle.Primary),
+    ))],
   });
   addLog(interaction.guildId, "ticket_panel_published", interaction.user.id, `[${panel.name}] ${channel.id}`);
   await interaction.reply({ content: `Ticket-Panel wurde in ${channel} veröffentlicht.`, ephemeral: true });
@@ -265,11 +276,30 @@ async function handleTicketPanelCommand(interaction: ChatInputCommandInteraction
 async function handleTicketButton(interaction: ButtonInteraction) {
   if (!interaction.guildId || !interaction.guild) throw new Error("Tickets können nur auf einem Server geöffnet werden.");
   if (interaction.customId.startsWith("ticket:open:")) {
-    const panelId = interaction.customId.slice("ticket:open:".length);
+    const parts = interaction.customId.slice("ticket:open:".length).split(":");
+    const panelId = parts[0];
+    const ticketType = parts[1] || "support";
     const panel = db.prepare("SELECT * FROM ticket_panels WHERE id = ? AND guild_id = ?").get(panelId, interaction.guildId) as
       | { id: string; name: string; title: string; description: string; ticket_category_id: string | null; support_role_id: string | null }
       | undefined;
     if (!panel) throw new Error("Dieses Ticket-Panel ist nicht mehr verfügbar.");
+    let config: { panelOptions?: { id: string; label: string }[]; questions?: { id: string; label: string; required: boolean }[] } = {};
+    try { config = JSON.parse((panel as { panel_config_json?: string }).panel_config_json || "{}"); } catch { config = {}; }
+    if (config.questions?.length) {
+      const optionLabel = config.panelOptions?.find((option) => option.id === ticketType)?.label || ticketType;
+      const modal = new ModalBuilder().setCustomId(`ticket:submit:${panel.id}:${ticketType}`).setTitle(optionLabel.slice(0, 45));
+      const rows = config.questions.slice(0, 5).map((question) => new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId(question.id)
+          .setLabel(question.label.slice(0, 45))
+          .setStyle(TextInputStyle.Short)
+          .setRequired(question.required !== false)
+          .setMaxLength(500),
+      ));
+      modal.addComponents(...rows);
+      await interaction.showModal(modal);
+      return;
+    }
     const existing = db.prepare(`
       SELECT channel_id FROM tickets
       WHERE guild_id = ? AND creator_id = ? AND panel_id = ? AND status IN ('open', 'in_progress', 'waiting')
@@ -464,6 +494,68 @@ async function handlePollCommand(interaction: ChatInputCommandInteraction) {
   await interaction.reply({ content: "Umfrage wurde erstellt.", ephemeral: true });
 }
 
+async function handleTicketModalSubmit(interaction: ModalSubmitInteraction) {
+  if (!interaction.guildId || !interaction.guild) throw new Error("Tickets können nur auf einem Server erstellt werden.");
+  if (!interaction.customId.startsWith("ticket:submit:")) return;
+  const parts = interaction.customId.slice("ticket:submit:".length).split(":");
+  const panelId = parts[0];
+  const ticketType = parts[1] || "support";
+  const panel = db.prepare("SELECT * FROM ticket_panels WHERE id = ? AND guild_id = ?").get(panelId, interaction.guildId) as
+    | { id: string; name: string; title: string; description: string; panel_channel_id: string; ticket_category_id: string | null; support_role_id: string | null; panel_config_json: string }
+    | undefined;
+  if (!panel) throw new Error("Dieses Ticket-Panel ist nicht mehr verfügbar.");
+
+  let config: { panelOptions?: { id: string; label: string }[]; questions?: { id: string; label: string }[] } = {};
+  try { config = JSON.parse(panel.panel_config_json || "{}"); } catch { config = {}; }
+  const optionLabel = config.panelOptions?.find((option) => option.id === ticketType)?.label || ticketType;
+  const answers = (config.questions || []).map((question) => {
+    const answer = interaction.fields.getTextInputValue(question.id).trim();
+    return `**${question.label}:** ${answer}`;
+  });
+
+  const existing = db.prepare(`
+    SELECT channel_id FROM tickets
+    WHERE guild_id = ? AND creator_id = ? AND panel_id = ? AND status IN ('open', 'in_progress', 'waiting')
+    ORDER BY created_at DESC LIMIT 1
+  `).get(interaction.guildId, interaction.user.id, panel.id) as { channel_id: string | null } | undefined;
+  if (existing?.channel_id) {
+    await interaction.reply({ content: `Du hast bereits ein offenes Ticket: <#${existing.channel_id}>`, ephemeral: true });
+    return;
+  }
+
+  const safeUsername = interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 40);
+  const permissionOverwrites = [
+    { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+    { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] },
+  ];
+  if (client.user) permissionOverwrites.push({ id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageChannels] });
+  if (panel.support_role_id) permissionOverwrites.push({ id: panel.support_role_id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] });
+
+  const channel = await interaction.guild.channels.create({
+    name: `${ticketType}-${safeUsername || interaction.user.id.slice(-6)}`.slice(0, 100),
+    type: ChannelType.GuildText,
+    parent: panel.ticket_category_id || undefined,
+    permissionOverwrites,
+    reason: `${optionLabel}-Ticket von ${interaction.user.tag}`,
+  });
+  const ticketId = randomUUID();
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO tickets (id, guild_id, creator_id, creator_name, subject, category, status, panel_id, channel_id, support_role_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)
+  `).run(ticketId, interaction.guildId, interaction.user.id, interaction.user.globalName || interaction.user.username,
+    panel.title, optionLabel, panel.id, channel.id, panel.support_role_id, now, now);
+  await channel.send({
+    content: `${interaction.user} ${panel.support_role_id ? `<@&${panel.support_role_id}>` : ""}`.trim(),
+    embeds: [new EmbedBuilder().setColor(0x8057e8).setTitle(optionLabel).setDescription(answers.length ? answers.join("\n\n") : panel.description || "Ticket wurde erstellt.")],
+    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`ticket:close:${ticketId}`).setLabel("Ticket schließen").setStyle(ButtonStyle.Secondary),
+    )],
+  });
+  addLog(interaction.guildId, "ticket_created", interaction.user.id, `[${optionLabel}] ${channel.id}`, channel.id);
+  await interaction.reply({ content: `Dein Ticket wurde erstellt: ${channel}`, ephemeral: true });
+}
+
 async function handleChatCommand(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName === "clan") return handleClanCommand(interaction);
   if (interaction.commandName === "ticketpanel") return handleTicketPanelCommand(interaction);
@@ -498,9 +590,11 @@ client.on("interactionCreate", async (interaction) => {
   const toolCommands = ["clan", "ticketpanel", "sync", "serverinfo", "userinfo", "warn", "clear", "announce", "poll"];
   const isToolCommand = interaction.isChatInputCommand() && toolCommands.includes(interaction.commandName);
   const isTicketButton = interaction.isButton() && interaction.customId.startsWith("ticket:");
-  if (!isToolCommand && !isTicketButton) return;
+  const isTicketModal = interaction.isModalSubmit() && interaction.customId.startsWith("ticket:submit:");
+  if (!isToolCommand && !isTicketButton && !isTicketModal) return;
   try {
     if (interaction.isButton()) await handleTicketButton(interaction);
+    else if (interaction.isModalSubmit()) await handleTicketModalSubmit(interaction);
     else if (interaction.isChatInputCommand()) await handleChatCommand(interaction);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Der Clan-Befehl ist fehlgeschlagen.";

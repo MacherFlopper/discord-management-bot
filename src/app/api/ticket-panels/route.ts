@@ -35,6 +35,21 @@ export async function POST(request: Request) {
     const categoryId = typeof body.ticketCategoryId === "string" && body.ticketCategoryId ? body.ticketCategoryId : null;
     const supportRoleId = typeof body.supportRoleId === "string" && body.supportRoleId ? body.supportRoleId : null;
     const buttonLabel = typeof body.buttonLabel === "string" ? body.buttonLabel.trim() : "Ticket erstellen";
+    const panelOptions = Array.isArray(body.panelOptions)
+      ? body.panelOptions.filter((option): option is { id: string; label: string; style: string } => {
+          if (!option || typeof option !== "object") return false;
+          const value = option as Record<string, unknown>;
+          return typeof value.id === "string" && typeof value.label === "string" && typeof value.style === "string";
+        }).slice(0, 5)
+      : [{ id: "support", label: buttonLabel, style: "primary" }];
+    const questions = Array.isArray(body.questions)
+      ? body.questions.filter((question): question is { id: string; label: string; required: boolean } => {
+          if (!question || typeof question !== "object") return false;
+          const value = question as Record<string, unknown>;
+          return typeof value.id === "string" && typeof value.label === "string";
+        }).slice(0, 5)
+      : [];
+    if (!panelOptions.length) panelOptions.push({ id: "support", label: buttonLabel, style: "primary" });
     if (!guildId || name.length < 2 || name.length > 50 || !title || title.length > 100 || description.length > 1500 || !panelChannelId || buttonLabel.length < 1 || buttonLabel.length > 80) {
       return NextResponse.json({ error: "Bitte prüfe Name, Titel, Beschreibung, Ziel-Channel und Button-Text." }, { status: 400 });
     }
@@ -55,9 +70,9 @@ export async function POST(request: Request) {
     const id = randomUUID();
     db.prepare(`
       INSERT INTO ticket_panels
-        (id, guild_id, name, title, description, panel_channel_id, ticket_category_id, support_role_id, button_label, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, guildId, name, title, description, panelChannelId, categoryId, supportRoleId, buttonLabel, new Date().toISOString());
+        (id, guild_id, name, title, description, panel_channel_id, ticket_category_id, support_role_id, button_label, panel_config_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, guildId, name, title, description, panelChannelId, categoryId, supportRoleId, buttonLabel, JSON.stringify({ panelOptions, questions }), new Date().toISOString());
     return NextResponse.json({ id }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Ticket-Panel konnte nicht gespeichert werden.";
