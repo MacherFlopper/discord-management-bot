@@ -53,6 +53,34 @@ export default function ToolsPage() {
       description: "Zeigt Discord-ID, Bot-Status und Serverbeitritt eines Nutzers.",
       permission: "Keine Sonderrechte",
     },
+    {
+      icon: RefreshCw,
+      title: "Benutzer verwarnen",
+      command: "/warn",
+      description: "Speichert eine Verwarnung und informiert den Nutzer per Nachricht.",
+      permission: "Mitglieder moderieren",
+    },
+    {
+      icon: RefreshCw,
+      title: "Nachrichten löschen",
+      command: "/clear",
+      description: "Bereinigt bis zu 100 neue Nachrichten in einem Text-Channel.",
+      permission: "Nachrichten verwalten",
+    },
+    {
+      icon: Server,
+      title: "Ankündigung senden",
+      command: "/announce",
+      description: "Veröffentlicht eine formatierte Serverankündigung in einem Channel.",
+      permission: "Server verwalten",
+    },
+    {
+      icon: UserRound,
+      title: "Umfrage erstellen",
+      command: "/poll",
+      description: "Erstellt eine Umfrage mit bis zu fünf Reaktionsoptionen.",
+      permission: "Keine Sonderrechte",
+    },
   ];
 
   return (

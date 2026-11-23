@@ -115,6 +115,27 @@ export default function TicketsPage() {
     }
   }
 
+  async function updateTicketStatus(ticket: TicketRow, status: "open" | "in_progress" | "waiting" | "closed") {
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/tickets", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketId: ticket.id, guildId, status }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Ticket konnte nicht aktualisiert werden.");
+      setNotice(`Ticketstatus wurde auf „${status}“ geändert.`);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Ticket konnte nicht aktualisiert werden.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function deletePanel(panel: Panel) {
     if (!window.confirm(`Ticket-Panel „${panel.name}“ löschen? Bereits erstellte Tickets bleiben erhalten.`)) return;
     try {
@@ -178,7 +199,7 @@ export default function TicketsPage() {
 
       <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#11151d]">
         <div className="flex items-center justify-between border-b border-white/[0.06] p-5"><div><h2 className="font-semibold text-white">Tickets</h2><p className="mt-1 text-xs text-slate-500">Aktive und geschlossene Supportfälle</p></div><Send size={17} className="text-slate-600" /></div>
-        {tickets.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-white/[0.015] text-[11px] uppercase tracking-wider text-slate-600"><tr><th className="px-5 py-3">Ticket</th><th className="px-5 py-3">Ersteller</th><th className="px-5 py-3">Panel</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Erstellt</th><th className="px-5 py-3">Channel</th></tr></thead><tbody>{tickets.map((ticket) => <tr key={ticket.id} className="border-t border-white/[0.04] hover:bg-white/[0.015]"><td className="px-5 py-3 font-medium text-slate-200">{ticket.subject}</td><td className="px-5 py-3 text-slate-400">{ticket.creator_name || ticket.creator_id}</td><td className="px-5 py-3 text-slate-400">{ticket.category || "—"}</td><td className="px-5 py-3"><span className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${ticket.status === "closed" ? "bg-slate-700/40 text-slate-400" : "bg-emerald-400/10 text-emerald-300"}`}>{ticket.status}</span></td><td className="whitespace-nowrap px-5 py-3 text-xs text-slate-500">{new Date(ticket.created_at).toLocaleString("de-DE")}</td><td className="px-5 py-3">{ticket.channel_id ? <a className="text-cyan-300 hover:underline" href={`https://discord.com/channels/${guildId}/${ticket.channel_id}`} target="_blank" rel="noreferrer">Öffnen</a> : "—"}</td></tr>)}</tbody></table></div> : <div className="px-6 py-10 text-center text-sm text-slate-500">Noch keine Tickets erstellt. Veröffentliche ein Panel und teste den Button in Discord.</div>}
+        {tickets.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-white/[0.015] text-[11px] uppercase tracking-wider text-slate-600"><tr><th className="px-5 py-3">Ticket</th><th className="px-5 py-3">Ersteller</th><th className="px-5 py-3">Panel</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Erstellt</th><th className="px-5 py-3">Channel</th><th className="px-5 py-3">Aktion</th></tr></thead><tbody>{tickets.map((ticket) => <tr key={ticket.id} className="border-t border-white/[0.04] hover:bg-white/[0.015]"><td className="px-5 py-3 font-medium text-slate-200">{ticket.subject}</td><td className="px-5 py-3 text-slate-400">{ticket.creator_name || ticket.creator_id}</td><td className="px-5 py-3 text-slate-400">{ticket.category || "—"}</td><td className="px-5 py-3"><span className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${ticket.status === "closed" ? "bg-slate-700/40 text-slate-400" : "bg-emerald-400/10 text-emerald-300"}`}>{ticket.status}</span></td><td className="whitespace-nowrap px-5 py-3 text-xs text-slate-500">{new Date(ticket.created_at).toLocaleString("de-DE")}</td><td className="px-5 py-3">{ticket.channel_id ? <a className="text-cyan-300 hover:underline" href={`https://discord.com/channels/${guildId}/${ticket.channel_id}`} target="_blank" rel="noreferrer">Öffnen</a> : "—"}</td><td className="px-5 py-3">{ticket.status !== "closed" ? <button disabled={saving} onClick={() => void updateTicketStatus(ticket, "closed")} className="rounded-lg border border-emerald-400/20 px-2.5 py-1.5 text-xs text-emerald-300 hover:bg-emerald-400/10 disabled:opacity-50">Schließen</button> : <span className="text-xs text-slate-600">Geschlossen</span>}</td></tr>)}</tbody></table></div> : <div className="px-6 py-10 text-center text-sm text-slate-500">Noch keine Tickets erstellt. Veröffentliche ein Panel und teste den Button in Discord.</div>}
       </section>
     </div>
   );

@@ -7,21 +7,30 @@ type Authorization =
 
 function isSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  if (!origin) return false;
+  const secFetchSite = request.headers.get("sec-fetch-site");
+  if (secFetchSite === "same-origin") return true;
 
   try {
-    const requestOrigin = new URL(request.url).origin;
+    const requestHost = new URL(request.url).host;
     const forwardedHost = request.headers.get("x-forwarded-host")?.split(",", 1)[0]?.trim();
+    const referer = request.headers.get("referer");
+    const candidateOrigins = [origin, referer].filter((value): value is string => Boolean(value));
+
+    for (const candidate of candidateOrigins) {
+      const candidateUrl = new URL(candidate);
+      if (candidateUrl.host === requestHost || candidateUrl.host === forwardedHost) return true;
+    }
+
     const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim() || "https";
     const forwardedOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
     const configuredOrigins = [
-      requestOrigin,
+      new URL(request.url).origin,
       forwardedOrigin,
       process.env.AUTH_URL,
       process.env.NEXT_PUBLIC_APP_URL,
     ].filter((value): value is string => Boolean(value)).map((value) => new URL(value).origin);
 
-    return configuredOrigins.includes(new URL(origin).origin);
+    return candidateOrigins.some((candidate) => configuredOrigins.includes(new URL(candidate).origin));
   } catch {
     return false;
   }

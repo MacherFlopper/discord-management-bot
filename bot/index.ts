@@ -142,6 +142,33 @@ const userInfoCommand = new SlashCommandBuilder()
   .setDescription("Zeigt Informationen über einen Benutzer")
   .addUserOption((option) => option.setName("benutzer").setDescription("Discord-Benutzer").setRequired(false));
 
+const warnCommand = new SlashCommandBuilder()
+  .setName("warn")
+  .setDescription("Verwarnt einen Benutzer und speichert den Fall")
+  .setDefaultMemberPermissions(PermissionsBitField.Flags.ModerateMembers)
+  .addUserOption((option) => option.setName("benutzer").setDescription("Zu verwarnender Benutzer").setRequired(true))
+  .addStringOption((option) => option.setName("grund").setDescription("Grund der Verwarnung").setRequired(true));
+
+const clearCommand = new SlashCommandBuilder()
+  .setName("clear")
+  .setDescription("Löscht mehrere Nachrichten aus diesem Channel")
+  .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
+  .addIntegerOption((option) => option.setName("anzahl").setDescription("Anzahl von 1 bis 100").setMinValue(1).setMaxValue(100).setRequired(true));
+
+const announceCommand = new SlashCommandBuilder()
+  .setName("announce")
+  .setDescription("Sendet eine offizielle Ankündigung")
+  .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild)
+  .addChannelOption((option) => option.setName("channel").setDescription("Ziel-Channel").setRequired(true))
+  .addStringOption((option) => option.setName("titel").setDescription("Ankündigungstitel").setRequired(true))
+  .addStringOption((option) => option.setName("text").setDescription("Ankündigungstext").setRequired(true));
+
+const pollCommand = new SlashCommandBuilder()
+  .setName("poll")
+  .setDescription("Erstellt eine Umfrage mit Reaktionen")
+  .addStringOption((option) => option.setName("frage").setDescription("Umfragefrage").setRequired(true))
+  .addStringOption((option) => option.setName("optionen").setDescription("Bis zu 5 Optionen, getrennt durch |").setRequired(true));
+
 async function syncApplicationCommands(guild: Guild) {
   const commands = await guild.commands.fetch();
   const legacyClanCommand = commands.find((command) =>
@@ -149,7 +176,7 @@ async function syncApplicationCommands(guild: Guild) {
   );
   if (legacyClanCommand) await guild.commands.delete(legacyClanCommand.id);
 
-  for (const commandData of [clanCommand.toJSON(), ticketPanelCommand.toJSON(), syncCommand.toJSON(), serverInfoCommand.toJSON(), userInfoCommand.toJSON()]) {
+  for (const commandData of [clanCommand.toJSON(), ticketPanelCommand.toJSON(), syncCommand.toJSON(), serverInfoCommand.toJSON(), userInfoCommand.toJSON(), warnCommand.toJSON(), clearCommand.toJSON(), announceCommand.toJSON(), pollCommand.toJSON()]) {
     const existing = commands.find((command) => command.name === commandData.name);
     if (!existing) {
       await guild.commands.create(commandData);
@@ -373,12 +400,80 @@ async function handleUserInfoCommand(interaction: ChatInputCommandInteraction) {
   await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
+async function handleWarnCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guildId) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
+  if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ModerateMembers)) {
+    throw new Error("Für Verwarnungen wird die Berechtigung „Mitglieder moderieren“ benötigt.");
+  }
+  const user = interaction.options.getUser("benutzer", true);
+  const reason = interaction.options.getString("grund", true);
+  db.prepare(`
+    INSERT INTO moderation_cases (guild_id, target_id, target_name, moderator_id, moderator_name, action, reason, duration, created_at)
+    VALUES (?, ?, ?, ?, ?, 'warn', ?, NULL, ?)
+  `).run(interaction.guildId, user.id, user.tag, interaction.user.id, interaction.user.tag, reason, new Date().toISOString());
+  addLog(interaction.guildId, "member_warn", interaction.user.id, `${user.tag}: ${reason}`);
+  await user.send(`Du wurdest auf **${interaction.guild?.name || "einem Server"}** verwarnt. Grund: ${reason}`).catch(() => undefined);
+  await interaction.reply({ content: `**${user.tag}** wurde verwarnt. Grund: ${reason}`, ephemeral: true });
+}
+
+async function handleClearCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.channel?.isTextBased() || !("bulkDelete" in interaction.channel)) {
+    throw new Error("Nachrichten können nur in einem Text-Channel gelöscht werden.");
+  }
+  if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageMessages)) {
+    throw new Error("Für das Löschen wird die Berechtigung „Nachrichten verwalten“ benötigt.");
+  }
+  const amount = interaction.options.getInteger("anzahl", true);
+  const deleted = await interaction.channel.bulkDelete(amount, true);
+  addLog(interaction.guildId, "messages_cleared", interaction.user.id, `${deleted.size} Nachrichten`, interaction.channelId);
+  await interaction.reply({ content: `${deleted.size} Nachrichten wurden gelöscht.`, ephemeral: true });
+}
+
+async function handleAnnounceCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guildId) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
+  if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild)) {
+    throw new Error("Für Ankündigungen wird „Server verwalten“ benötigt.");
+  }
+  const resolvedChannel = interaction.options.getChannel("channel", true);
+  const channel = await interaction.guild?.channels.fetch(resolvedChannel.id);
+  if (!channel?.isTextBased() || !("send" in channel)) throw new Error("Der Ziel-Channel muss ein Text-Channel sein.");
+  const title = interaction.options.getString("titel", true);
+  const text = interaction.options.getString("text", true);
+  const embed = new EmbedBuilder().setColor(0x8057e8).setTitle(title).setDescription(text).setFooter({ text: `Veröffentlicht von ${interaction.user.tag}` });
+  await channel.send({ embeds: [embed] });
+  addLog(interaction.guildId, "announcement", interaction.user.id, title, channel.id);
+  await interaction.reply({ content: `Ankündigung wurde in ${channel} veröffentlicht.`, ephemeral: true });
+}
+
+async function handlePollCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.channel?.isTextBased() || !("send" in interaction.channel)) {
+    throw new Error("Umfragen funktionieren nur in einem Text-Channel.");
+  }
+  const question = interaction.options.getString("frage", true);
+  const options = interaction.options.getString("optionen", true).split("|").map((option) => option.trim()).filter(Boolean);
+  if (options.length < 2 || options.length > 5) throw new Error("Bitte gib 2 bis 5 Optionen an, getrennt durch |.");
+  const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
+  const embed = new EmbedBuilder()
+    .setColor(0x8057e8)
+    .setTitle(question)
+    .setDescription(options.map((option, index) => `${emojis[index]} ${option}`).join("\n\n"))
+    .setFooter({ text: `Umfrage von ${interaction.user.tag}` });
+  const message = await interaction.channel.send({ embeds: [embed] });
+  for (let index = 0; index < options.length; index += 1) await message.react(emojis[index]);
+  if (interaction.guildId) addLog(interaction.guildId, "poll_created", interaction.user.id, question, interaction.channelId);
+  await interaction.reply({ content: "Umfrage wurde erstellt.", ephemeral: true });
+}
+
 async function handleChatCommand(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName === "clan") return handleClanCommand(interaction);
   if (interaction.commandName === "ticketpanel") return handleTicketPanelCommand(interaction);
   if (interaction.commandName === "sync") return handleSyncCommand(interaction);
   if (interaction.commandName === "serverinfo") return handleServerInfoCommand(interaction);
   if (interaction.commandName === "userinfo") return handleUserInfoCommand(interaction);
+  if (interaction.commandName === "warn") return handleWarnCommand(interaction);
+  if (interaction.commandName === "clear") return handleClearCommand(interaction);
+  if (interaction.commandName === "announce") return handleAnnounceCommand(interaction);
+  if (interaction.commandName === "poll") return handlePollCommand(interaction);
 }
 
 client.once("clientReady", async () => {
@@ -400,7 +495,7 @@ client.on("guildCreate", (guild) => {
   syncApplicationCommands(guild).catch((error) => console.error(`Discord-Befehle konnten nicht synchronisiert werden (${guild.id}):`, error));
 });
 client.on("interactionCreate", async (interaction) => {
-  const toolCommands = ["clan", "ticketpanel", "sync", "serverinfo", "userinfo"];
+  const toolCommands = ["clan", "ticketpanel", "sync", "serverinfo", "userinfo", "warn", "clear", "announce", "poll"];
   const isToolCommand = interaction.isChatInputCommand() && toolCommands.includes(interaction.commandName);
   const isTicketButton = interaction.isButton() && interaction.customId.startsWith("ticket:");
   if (!isToolCommand && !isTicketButton) return;
