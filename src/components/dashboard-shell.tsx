@@ -40,10 +40,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { data: session, status } = useSession();
 
-  if (status === "loading") {
-    return <div className="grid min-h-screen place-items-center bg-[#090b10] text-sm text-slate-400">Sitzung wird geprüft...</div>;
-  }
-  if (status === "unauthenticated") return children;
+  if (status !== "authenticated") return children;
 
   return (
     <div className="min-h-screen bg-[#090b10] text-slate-100">
