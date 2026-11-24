@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
-  Check, ChevronDown, Crown, LoaderCircle, Plus, RefreshCw, Shield,
+  Check, ChevronDown, Clock3, Crown, LoaderCircle, Plus, RefreshCw, Shield,
   Swords, Trash2, Users, X,
 } from "lucide-react";
+import { formatWholeAmount } from "../../../lib/pricing";
 
 type Guild = { id: string; name: string };
 type ClanRole = {
@@ -16,11 +18,25 @@ type ClanRole = {
   color: number;
   position: number;
   member_count: number;
+  place: number;
+  base_price: number;
+  current_price: number;
+  discount_active: boolean;
+  discount_percent: number;
+  configured_discount_percent: number | null;
+  discount_expires_at: string | null;
 };
 type DiscordRole = { id: string; name: string; clan_eligible: boolean };
 type Member = { id: string; username: string; display_name: string | null; avatar: string | null };
 
 const fieldClass = "h-11 w-full rounded-lg border border-white/[0.08] bg-[#0b0e14] px-3 text-sm text-slate-100 outline-none transition focus:border-violet-500/60";
+
+function toLocalDateTime(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
 
 export default function ClansPage() {
   const [guilds, setGuilds] = useState<Guild[]>([]);
@@ -29,9 +45,13 @@ export default function ClansPage() {
   const [roles, setRoles] = useState<DiscordRole[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedRole, setSelectedRole] = useState<ClanRole | null>(null);
+  const [discountRole, setDiscountRole] = useState<ClanRole | null>(null);
   const [roleToAdd, setRoleToAdd] = useState("");
+  const [discountPercent, setDiscountPercent] = useState("50");
+  const [discountExpiresAt, setDiscountExpiresAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingDiscount, setSavingDiscount] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -85,6 +105,20 @@ export default function ClansPage() {
       if (active) setLoading(false);
     });
     return () => { active = false; };
+  }, [guildId]);
+
+  useEffect(() => {
+    if (!guildId) return;
+    const interval = setInterval(() => {
+      fetch(`/api/clans?guildId=${encodeURIComponent(guildId)}`)
+        .then(async (response) => {
+          if (!response.ok) throw new Error("Clan-Mitgliederzahlen konnten nicht aktualisiert werden.");
+          return response.json() as Promise<ClanRole[]>;
+        })
+        .then(setClans)
+        .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Clan-Mitgliederzahlen konnten nicht aktualisiert werden."));
+    }, 30_000);
+    return () => clearInterval(interval);
   }, [guildId]);
 
   const availableRoles = useMemo(() => {
@@ -147,6 +181,43 @@ export default function ClansPage() {
     }
   }
 
+  async function updateDiscount(role: ClanRole, percent: number, expiresAt: string | null) {
+    setSavingDiscount(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/clans/${role.role_id}?guildId=${encodeURIComponent(role.guild_id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discountPercent: percent, expiresAt }),
+      });
+      const data = await response.json() as { error?: unknown; saved?: boolean; announcementSent?: boolean };
+      if (!response.ok) {
+        if (data.saved) await loadClanRoles(role.guild_id);
+        throw new Error(typeof data.error === "string" ? data.error : "Rabatt konnte nicht gespeichert werden.");
+      }
+      const action = percent ? `Rabatt für ${role.name} gespeichert` : `Rabatt für ${role.name} entfernt`;
+      setNotice(data.announcementSent ? `${action} und in Discord angekündigt.` : `${action}. Der Preis bleibt unverändert.`);
+      setDiscountRole(null);
+      await loadClanRoles(role.guild_id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Rabatt konnte nicht gespeichert werden.");
+    } finally {
+      setSavingDiscount(false);
+    }
+  }
+
+  async function saveDiscount() {
+    if (!discountRole) return;
+    const percent = Number(discountPercent);
+    const expiry = new Date(discountExpiresAt);
+    if (!Number.isInteger(percent) || percent < 1 || percent > 99 || !discountExpiresAt || Number.isNaN(expiry.getTime())) {
+      setError("Gib einen Rabatt von 1–99 % und ein gültiges Ablaufdatum an.");
+      return;
+    }
+    await updateDiscount(discountRole, percent, expiry.toISOString());
+  }
+
   return (
     <div className="space-y-6">
       <section className="relative overflow-hidden rounded-2xl border border-violet-400/15 bg-gradient-to-br from-[#251a45] via-[#151326] to-[#10131b] p-5 sm:p-7">
@@ -154,8 +225,8 @@ export default function ClansPage() {
         <div className="relative flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-violet-300/15 bg-violet-300/[0.07] px-3 py-1 text-xs text-violet-200"><Swords size={13} /> COMMUNITY · DISCORD-ROLLEN</div>
-            <h1 className="text-3xl font-semibold tracking-tight text-white">Clan-Rollen</h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">Ein Clan ist hier eine normale Discord-Rolle. Wähle aus, welche Rollen als Clans gelten. Mitglieder erhalten oder verlassen die Rolle mit <code className="rounded bg-white/[0.06] px-1.5 py-0.5 text-violet-200">/clan join</code> und <code className="rounded bg-white/[0.06] px-1.5 py-0.5 text-violet-200">/clan leave</code>.</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-white">Clan-Panel</h1>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">Mitgliederzahlen werden laufend aus den Discord-Rollen aktualisiert. Der nächste Beitrittspreis richtet sich nach dem Mitgliederplatz; Rabattänderungen werden in Discord angekündigt.</p>
           </div>
           <select value={guildId} onChange={(event) => { setGuildId(event.target.value); setSelectedRole(null); setMembers([]); }} disabled={!guilds.length} className={`${fieldClass} min-w-52 md:max-w-64`}>
             {guilds.length ? guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>) : <option>Kein Server verbunden</option>}
@@ -208,7 +279,25 @@ export default function ClansPage() {
                   </div>
                   <div className="mt-4 flex items-center justify-between border-t border-white/[0.06] pt-3">
                     <span className="inline-flex items-center gap-1.5 text-sm text-slate-400"><Users size={15} />{role.member_count} Mitglieder</span>
+                    <span className="text-xs text-slate-500">Platz {role.place}</span>
                     <button onClick={() => void showMembers(role)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-violet-300 hover:bg-violet-400/10">Mitglieder <ChevronDown size={14} /></button>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-white/[0.05] bg-white/[0.02] p-3">
+                    <p className="text-xs text-slate-500">Beitrittspreis an axxinde</p>
+                    <p className="mt-1 text-lg font-semibold text-white">
+                      {role.discount_active && <s className="mr-2 text-sm font-normal text-slate-600">{formatWholeAmount(role.base_price)}</s>}
+                      {formatWholeAmount(role.current_price)}
+                    </p>
+                    {role.discount_active && role.discount_expires_at && <p className="mt-1 inline-flex items-center gap-1 text-xs text-amber-300"><Clock3 size={12} />−{role.discount_percent}% bis {new Date(role.discount_expires_at).toLocaleString("de-DE", { timeZone: "Europe/Berlin" })}</p>}
+                    {!role.discount_active && role.configured_discount_percent !== null && <p className="mt-1 text-xs text-slate-500">Rabatt abgelaufen</p>}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button onClick={() => {
+                        setDiscountRole(role);
+                        setDiscountPercent(String(role.discount_active ? role.discount_percent : role.configured_discount_percent || 50));
+                        setDiscountExpiresAt(toLocalDateTime(role.discount_expires_at));
+                      }} className="rounded-lg border border-violet-400/20 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-400/10">{role.discount_active ? "Rabatt ändern" : "Rabatt einstellen"}</button>
+                      {role.configured_discount_percent !== null && <button onClick={() => void updateDiscount(role, 0, null)} disabled={savingDiscount} className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-xs text-slate-400 hover:bg-white/[0.04] disabled:opacity-50">Rabatt entfernen</button>}
+                    </div>
                   </div>
                 </article>
               );
@@ -216,6 +305,21 @@ export default function ClansPage() {
           </div>
         )}
       </section>
+
+      {discountRole && (
+        <section className="rounded-2xl border border-violet-400/15 bg-[#11151d] p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div><p className="text-xs font-semibold tracking-widest text-violet-300">RABATT EINSTELLEN</p><h2 className="mt-1 text-lg font-semibold text-white">{discountRole.name}</h2><p className="mt-1 text-sm text-slate-500">Der Rabatt gilt für den aktuell berechneten Beitrittspreis und endet automatisch.</p></div>
+            <button onClick={() => setDiscountRole(null)} className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-white/[0.05] hover:text-white" aria-label="Rabattbearbeitung schließen"><X size={17} /></button>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
+            <label className="space-y-1.5 text-xs text-slate-400">Rabatt in Prozent<input type="number" min="1" max="99" step="1" value={discountPercent} onChange={(event) => setDiscountPercent(event.target.value)} className={fieldClass} /></label>
+            <label className="space-y-1.5 text-xs text-slate-400">Ablaufdatum und Uhrzeit (deine lokale Zeit)<input type="datetime-local" value={discountExpiresAt} onChange={(event) => setDiscountExpiresAt(event.target.value)} className={fieldClass} /></label>
+            <button onClick={() => void saveDiscount()} disabled={savingDiscount} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 text-sm font-medium text-white hover:bg-violet-400 disabled:opacity-50">{savingDiscount ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={15} />} Rabatt speichern</button>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">Discord-Ankündigungen benötigen einen gespeicherten Channel unter <Link href="/prices" className="text-violet-300 hover:underline">Preislisten</Link>.</p>
+        </section>
+      )}
 
       {selectedRole && (
         <section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#11151d]">

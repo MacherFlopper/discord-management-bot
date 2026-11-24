@@ -16,10 +16,17 @@ The bot needs the Server Members intent for member synchronization and these Dis
 - Manage Roles for clan-role join/leave
 - Manage Channels, View Channels, Send Messages and Read Message History for tickets
 - View Channels and Send Messages for welcome messages
+- View Channels and Send Messages in the configured price-announcement channel
 
 ## Clan roles
 
 Clans are ordinary Discord roles. Create the role in Discord, then register it in the dashboard under **Clans**. Roles with administrator or moderation permissions are rejected. Members can use `/clan join rolle:<role>` and `/clan leave rolle:<role>`. The bot role must be higher than each clan role in the Discord role hierarchy.
+
+Clan entry prices use the live role-member count: the next place is `member count + 1`; places 1–5 cost 10,000,000 each, and place 6 onward costs 20,000,000 each. The dashboard refreshes member totals automatically. Discounts from 1–99% require an expiry time and are announced when enabled, removed, or expired. Use `/clanpreise` for the current values; payment destination is `axxinde`.
+
+## Spawner prices
+
+The **Preislisten** dashboard panel starts with the Skelett, Creeper, Eisengolem, Spinne, Blaze, Kuh and Piglin prices from the supplied list. Select a Discord announcement channel before changing prices. Every saved change records the prior and new buy/sell amounts and posts the difference with the previous amount crossed out. Use `/spawnerpreise` to display the current list.
 
 ## Ticket panels
 

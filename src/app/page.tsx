@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Activity, Bot, MessageSquare, ShieldCheck, Swords, Ticket, Users } from "lucide-react";
+import { Activity, Bot, MessageSquare, Package, ShieldCheck, Swords, Ticket } from "lucide-react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 type Status = {
@@ -10,7 +10,6 @@ type Status = {
   botOnline: boolean;
   database: string;
   guildCount: number;
-  memberCount: number;
   ticketCount: number;
   logCount: number;
   clanCount: number;
@@ -35,9 +34,9 @@ export default function Home() {
   }, []);
 
   const cards = [
-    { label: "Mitglieder", value: status?.memberCount ?? "—", icon: Users, color: "text-violet-400", detail: "Synchronisierte Mitglieder", href: "/members" },
     { label: "Server", value: status?.guildCount ?? "—", icon: ShieldCheck, color: "text-blue-400", detail: "Verbundene Server", href: "/servers" },
     { label: "Clans", value: status?.clanCount ?? "—", icon: Swords, color: "text-fuchsia-400", detail: "Community-Clans", href: "/clans" },
+    { label: "Preislisten", value: "Öffnen", icon: Package, color: "text-emerald-400", detail: "Clan- & Spawnerpreise", href: "/prices" },
     { label: "Tickets", value: status?.ticketCount ?? "—", icon: Ticket, color: "text-amber-400", detail: "Gesamte Tickets", href: "/tickets" },
     { label: "Aktivitäten", value: status?.logCount ?? "—", icon: MessageSquare, color: "text-cyan-400", detail: "Erfasste Bot-Ereignisse", href: "/logs" },
   ];

@@ -143,6 +143,49 @@ export function getDb() {
       FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS clan_discounts (
+      guild_id TEXT NOT NULL,
+      role_id TEXT NOT NULL,
+      discount_percent INTEGER NOT NULL CHECK (discount_percent BETWEEN 1 AND 99),
+      expires_at TEXT NOT NULL,
+      expiry_announced_at TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (guild_id, role_id),
+      FOREIGN KEY (guild_id, role_id) REFERENCES clan_roles(guild_id, role_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS spawner_prices (
+      guild_id TEXT NOT NULL,
+      spawner_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      buy_price INTEGER NOT NULL,
+      sell_price INTEGER NOT NULL,
+      sort_order INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (guild_id, spawner_key),
+      FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS spawner_price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      spawner_key TEXT NOT NULL,
+      old_buy_price INTEGER NOT NULL,
+      new_buy_price INTEGER NOT NULL,
+      old_sell_price INTEGER NOT NULL,
+      new_sell_price INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS price_announcement_channels (
+      guild_id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS ticket_panels (
       id TEXT PRIMARY KEY,
       guild_id TEXT NOT NULL,
@@ -172,6 +215,8 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_roles_guild ON roles(guild_id);
     CREATE INDEX IF NOT EXISTS idx_channels_guild ON channels(guild_id);
     CREATE INDEX IF NOT EXISTS idx_clan_roles_guild ON clan_roles(guild_id);
+    CREATE INDEX IF NOT EXISTS idx_spawner_prices_guild ON spawner_prices(guild_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_spawner_price_history_guild ON spawner_price_history(guild_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_ticket_panels_guild ON ticket_panels(guild_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets(guild_id, status);
     CREATE INDEX IF NOT EXISTS idx_logs_guild_created ON logs(guild_id, created_at);
@@ -191,6 +236,10 @@ export function getDb() {
   }
   if (!ticketColumns.some((column) => column.name === "support_role_id")) {
     db.exec("ALTER TABLE tickets ADD COLUMN support_role_id TEXT");
+  }
+  const clanDiscountColumns = db.prepare("PRAGMA table_info(clan_discounts)").all() as { name: string }[];
+  if (!clanDiscountColumns.some((column) => column.name === "expiry_announced_at")) {
+    db.exec("ALTER TABLE clan_discounts ADD COLUMN expiry_announced_at TEXT");
   }
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_active_per_user_panel

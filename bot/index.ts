@@ -8,7 +8,11 @@ import {
   type ButtonInteraction, type ChatInputCommandInteraction, type Guild,
   type ModalSubmitInteraction,
 } from "discord.js";
+import { getClanPrices } from "../lib/clan-pricing";
+import { publishPriceAnnouncement } from "../lib/discord-price-announcements";
 import { getDb } from "../lib/db";
+import { ensureSpawnerPrices } from "../lib/spawner-prices";
+import { calculateClanPrice, formatMillions, formatWholeAmount } from "../lib/pricing";
 import { randomUUID } from "node:crypto";
 
 const token = process.env.DISCORD_TOKEN;
@@ -23,7 +27,6 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
   ],
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
@@ -124,6 +127,14 @@ const clanCommand = new SlashCommandBuilder()
   .addSubcommand((command) => command.setName("leave").setDescription("Gib eine Clan-Rolle ab")
     .addRoleOption((option) => option.setName("rolle").setDescription("Clan-Rolle").setRequired(true)));
 
+const clanPricesCommand = new SlashCommandBuilder()
+  .setName("clanpreise")
+  .setDescription("Zeigt aktuelle Clan-Mitgliederzahlen und Beitrittspreise");
+
+const spawnerPricesCommand = new SlashCommandBuilder()
+  .setName("spawnerpreise")
+  .setDescription("Zeigt aktuelle Spawner-An- und Verkaufspreise");
+
 const ticketPanelCommand = new SlashCommandBuilder()
   .setName("ticketpanel")
   .setDescription("Veröffentlicht ein Ticket-Panel in seinem konfigurierten Channel")
@@ -178,7 +189,7 @@ async function syncApplicationCommands(guild: Guild) {
   );
   if (legacyClanCommand) await guild.commands.delete(legacyClanCommand.id);
 
-  for (const commandData of [clanCommand.toJSON(), ticketPanelCommand.toJSON(), syncCommand.toJSON(), serverInfoCommand.toJSON(), userInfoCommand.toJSON(), warnCommand.toJSON(), clearCommand.toJSON(), announceCommand.toJSON(), pollCommand.toJSON()]) {
+  for (const commandData of [clanCommand.toJSON(), clanPricesCommand.toJSON(), spawnerPricesCommand.toJSON(), ticketPanelCommand.toJSON(), syncCommand.toJSON(), serverInfoCommand.toJSON(), userInfoCommand.toJSON(), warnCommand.toJSON(), clearCommand.toJSON(), announceCommand.toJSON(), pollCommand.toJSON()]) {
     const existing = commands.find((command) => command.name === commandData.name);
     if (!existing) {
       await guild.commands.create(commandData);
@@ -237,6 +248,107 @@ async function handleClanCommand(interaction: ChatInputCommandInteraction) {
     content: joining ? `Du hast die Clan-Rolle **${role.name}** erhalten.` : `Du hast die Clan-Rolle **${role.name}** abgegeben.`,
     ephemeral: true,
   });
+}
+
+function createPriceEmbeds(title: string, lines: string[]) {
+  const chunks: string[] = [];
+  let chunk = "";
+  for (const line of lines) {
+    if (chunk && chunk.length + line.length + 1 > 3500) {
+      chunks.push(chunk);
+      chunk = "";
+    }
+    chunk = chunk ? `${chunk}\n\n${line}` : line;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.map((description, index) => new EmbedBuilder()
+    .setColor(0x8057e8)
+    .setTitle(index ? `${title} · Fortsetzung` : title)
+    .setDescription(description)
+    .setFooter({ text: "Preise in Spielwährung · Discord Control Hub" }));
+}
+
+async function replyWithPriceEmbeds(interaction: ChatInputCommandInteraction, embeds: EmbedBuilder[]) {
+  if (!embeds.length) {
+    await interaction.reply({ content: "Für diesen Server sind noch keine Preise hinterlegt.", ephemeral: true });
+    return;
+  }
+  await interaction.reply({ embeds: [embeds[0]], ephemeral: true });
+  for (const embed of embeds.slice(1)) {
+    await interaction.followUp({ embeds: [embed], ephemeral: true });
+  }
+}
+
+async function handleClanPricesCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guildId) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
+  const clans = getClanPrices([interaction.guildId]);
+  const lines = clans.map((clan) => {
+    const price = clan.discount_active
+      ? `💰 ~~${formatWholeAmount(clan.base_price)}~~ → **${formatWholeAmount(clan.current_price)}** · 🏷️ −${clan.discount_percent}% bis ${new Date(clan.discount_expires_at as string).toLocaleString("de-DE", { timeZone: "Europe/Berlin" })}`
+      : `💰 **${formatWholeAmount(clan.current_price)}**`;
+    return `**${clan.name}**\n👥 ${clan.member_count} Mitglieder · 🎟️ Platz **${clan.place}.**\n${price}`;
+  });
+  const embeds = createPriceEmbeds("Clan-Beitrittspreise", lines);
+  if (embeds[0]) embeds[0].setFooter({ text: "Bezahlt wird an axxinde · Werte werden live aus Discord-Rollenmitgliedschaften berechnet." });
+  await replyWithPriceEmbeds(interaction, embeds);
+}
+
+async function handleSpawnerPricesCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guildId) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
+  const prices = ensureSpawnerPrices(interaction.guildId);
+  const lines = prices.map((price) =>
+    `${price.emoji} **${price.name}**\nWir kaufen: **${formatMillions(price.buy_price)}**\nWir verkaufen: **${formatMillions(price.sell_price)}**`,
+  );
+  await replyWithPriceEmbeds(interaction, createPriceEmbeds("MRKET CLAN · SPAWNER AN- UND VERKAUF", lines));
+}
+
+async function announceExpiredClanDiscounts() {
+  const now = new Date().toISOString();
+  const expired = db.prepare(`
+    SELECT guild_id, role_id, discount_percent, expires_at
+    FROM clan_discounts
+    WHERE expires_at <= ? AND expiry_announced_at IS NULL
+    ORDER BY expires_at
+  `).all(now) as { guild_id: string; role_id: string; discount_percent: number; expires_at: string }[];
+
+  for (const discount of expired) {
+    const clan = getClanPrices([discount.guild_id]).find((item) => item.role_id === discount.role_id);
+    if (!clan) {
+      db.prepare(`
+        UPDATE clan_discounts SET expiry_announced_at = ?
+        WHERE guild_id = ? AND role_id = ? AND expires_at = ? AND expiry_announced_at IS NULL
+      `).run(now, discount.guild_id, discount.role_id, discount.expires_at);
+      continue;
+    }
+    const settings = db.prepare("SELECT channel_id FROM price_announcement_channels WHERE guild_id = ?").get(discount.guild_id) as
+      | { channel_id: string }
+      | undefined;
+    if (!settings) {
+      console.error(`Abgelaufener Clan-Rabatt konnte nicht angekündigt werden: kein Preiskanal für ${discount.guild_id}.`);
+      db.prepare(`
+        UPDATE clan_discounts SET expiry_announced_at = ?
+        WHERE guild_id = ? AND role_id = ? AND expires_at = ? AND expiry_announced_at IS NULL
+      `).run(now, discount.guild_id, discount.role_id, discount.expires_at);
+      continue;
+    }
+
+    const oldPrice = calculateClanPrice(clan.member_count, discount.discount_percent).currentPrice;
+    const content = [
+      `**CLAN-RABATT ABGELAUFEN · ${clan.name}**`,
+      `👥 ${clan.member_count} Mitglieder · 🎟️ Platz ${clan.place}`,
+      `Preis: ~~${formatWholeAmount(oldPrice)}~~ → **${formatWholeAmount(clan.base_price)}**`,
+      "Der reguläre Beitrittspreis gilt wieder.",
+    ].join("\n");
+    try {
+      await publishPriceAnnouncement(settings.channel_id, content);
+      db.prepare(`
+        UPDATE clan_discounts SET expiry_announced_at = ?
+        WHERE guild_id = ? AND role_id = ? AND expires_at = ? AND expiry_announced_at IS NULL
+      `).run(now, discount.guild_id, discount.role_id, discount.expires_at);
+    } catch (error) {
+      console.error(`Ablaufender Clan-Rabatt ${discount.guild_id}/${discount.role_id} konnte nicht angekündigt werden:`, error);
+    }
+  }
 }
 
 async function handleTicketPanelCommand(interaction: ChatInputCommandInteraction) {
@@ -558,6 +670,8 @@ async function handleTicketModalSubmit(interaction: ModalSubmitInteraction) {
 
 async function handleChatCommand(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName === "clan") return handleClanCommand(interaction);
+  if (interaction.commandName === "clanpreise") return handleClanPricesCommand(interaction);
+  if (interaction.commandName === "spawnerpreise") return handleSpawnerPricesCommand(interaction);
   if (interaction.commandName === "ticketpanel") return handleTicketPanelCommand(interaction);
   if (interaction.commandName === "sync") return handleSyncCommand(interaction);
   if (interaction.commandName === "serverinfo") return handleServerInfoCommand(interaction);
@@ -572,6 +686,11 @@ client.once("clientReady", async () => {
   console.log(`Discord Bot angemeldet als ${client.user?.tag}`);
   updateBotStatus("online");
   setInterval(() => updateBotStatus("online"), 15_000);
+  const checkExpiredDiscounts = () => announceExpiredClanDiscounts().catch((error) => {
+    console.error("Abgelaufene Clan-Rabatte konnten nicht verarbeitet werden:", error);
+  });
+  void checkExpiredDiscounts();
+  setInterval(checkExpiredDiscounts, 60_000);
   for (const guild of client.guilds.cache.values()) {
     await syncGuild(guild.id).catch((error) => console.error(`Sync fehlgeschlagen (${guild.id}):`, error));
     await syncApplicationCommands(guild).catch((error) => console.error(`Discord-Befehle konnten nicht synchronisiert werden (${guild.id}):`, error));
@@ -587,7 +706,7 @@ client.on("guildCreate", (guild) => {
   syncApplicationCommands(guild).catch((error) => console.error(`Discord-Befehle konnten nicht synchronisiert werden (${guild.id}):`, error));
 });
 client.on("interactionCreate", async (interaction) => {
-  const toolCommands = ["clan", "ticketpanel", "sync", "serverinfo", "userinfo", "warn", "clear", "announce", "poll"];
+  const toolCommands = ["clan", "clanpreise", "spawnerpreise", "ticketpanel", "sync", "serverinfo", "userinfo", "warn", "clear", "announce", "poll"];
   const isToolCommand = interaction.isChatInputCommand() && toolCommands.includes(interaction.commandName);
   const isTicketButton = interaction.isButton() && interaction.customId.startsWith("ticket:");
   const isTicketModal = interaction.isModalSubmit() && interaction.customId.startsWith("ticket:submit:");

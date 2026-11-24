@@ -3,8 +3,8 @@
 import Link from "next/link";
 import {
   Activity, Bell, Bot, ChevronDown, ChevronLeft, ChevronRight,
-  CircleGauge, Command, Hash, LayoutDashboard, Menu, Settings, Wrench,
-  ShieldCheck, Swords, Ticket, Users, X,
+  CircleGauge, Command, LayoutDashboard, Menu, Package, Settings, Wrench,
+  ShieldCheck, Swords, Ticket, X,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 import { useState, type ReactNode } from "react";
@@ -16,13 +16,9 @@ const groups = [
     { label: "Aktivitäten", href: "/logs", icon: Activity },
     { label: "Analytics", href: "/analytics", icon: Activity },
   ]},
-  { title: "VERWALTUNG", items: [
-    { label: "Mitglieder", href: "/members", icon: Users },
-    { label: "Rollen", href: "/roles", icon: ShieldCheck },
-    { label: "Channels", href: "/channels", icon: Hash },
-  ]},
   { title: "COMMUNITY", items: [
     { label: "Clans", href: "/clans", icon: Swords },
+    { label: "Preislisten", href: "/prices", icon: Package },
   ]},
   { title: "UNTERSTÜTZUNG", items: [
     { label: "Tickets", href: "/tickets", icon: Ticket },

@@ -3,13 +3,11 @@
 import { Suspense } from "react";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { Database, Search } from "lucide-react";
 
 const titles: Record<string, { title: string; description: string }> = {
   servers: { title: "Serverübersicht", description: "Synchronisierte Discord-Server und Konfiguration" },
-  members: { title: "Mitglieder", description: "Mitglieder aus der lokalen Synchronisationsdatenbank" },
-  roles: { title: "Rollen", description: "Discord-Rollen werden beim Bot-Sync erfasst" },
-  channels: { title: "Channels", description: "Channel-Struktur und Berechtigungen" },
   tickets: { title: "Tickets", description: "Ticketverwaltung und Supportfälle" },
   moderation: { title: "Moderation", description: "Warnungen, Kicks, Bans und Timeouts" },
   analytics: { title: "Analytics", description: "Auswertung synchronisierter Serverdaten" },
@@ -19,9 +17,6 @@ const titles: Record<string, { title: string; description: string }> = {
   logs: { title: "Aktivitäten", description: "Discord- und Systemereignisse" },
 };
 const endpoints: Record<string, string> = {
-  members: "/api/members",
-  roles: "/api/roles",
-  channels: "/api/channels",
   tickets: "/api/tickets",
   moderation: "/api/moderation",
   logs: "/api/logs",
@@ -34,18 +29,26 @@ function ModuleContent() {
   const meta = titles[moduleName] || { title: moduleName, description: "Modulübersicht" };
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(Boolean(endpoints[moduleName]));
-  const [botGuildCount, setBotGuildCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (endpoints[moduleName]) {
       fetch(endpoints[moduleName]).then((response) => response.ok ? response.json() : []).then(setRows).finally(() => setLoading(false));
     }
-    if (moduleName === "roles" || moduleName === "channels") {
-      fetch("/api/status").then((response) => response.json()).then((status: { botGuildCount: number }) => setBotGuildCount(status.botGuildCount));
-    }
   }, [moduleName]);
 
-  const dataModules = ["tickets", "servers", "members", "roles", "channels", "moderation", "logs"];
+  const dataModules = ["tickets", "servers", "moderation", "logs"];
+
+  if (["members", "roles", "channels"].includes(moduleName)) {
+    return (
+      <section className="grid min-h-72 place-items-center rounded-xl border border-white/[0.06] bg-[#11151d] px-6 text-center">
+        <div>
+          <h1 className="text-xl font-semibold text-white">Diese Verwaltung wurde entfernt</h1>
+          <p className="mt-2 text-sm text-slate-400">Für Clan-Rollen und Mitglieder nutze das Clan-Panel.</p>
+          <Link href="/clans" className="mt-4 inline-flex rounded-lg bg-violet-600 px-4 py-2 text-sm text-white hover:bg-violet-500">Clan-Panel öffnen</Link>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -63,7 +66,7 @@ function ModuleContent() {
             <span className="ml-auto text-xs text-slate-600">{rows.length} Einträge</span>
           </div>
           {loading ? <div className="py-16 text-center text-sm text-slate-500">Laden...</div> : rows.length === 0 ? (
-            <div className="grid min-h-72 place-items-center px-6 text-center"><div><Database size={28} className="mx-auto mb-3 text-slate-700" /><p className="text-sm text-slate-400">{(moduleName === "roles" || moduleName === "channels") && botGuildCount === 0 ? "Der Bot ist noch keinem Discord-Server hinzugefügt." : (moduleName === "roles" || moduleName === "channels") && botGuildCount !== null ? "Der Bot ist verbunden. Rollen und Channels erscheinen nach dem nächsten erfolgreichen Sync." : "Noch keine Daten vorhanden"}</p>{(moduleName === "roles" || moduleName === "channels") && botGuildCount === 0 && <p className="mt-2 text-xs text-slate-600">Lade den Bot auf deinen Server ein und starte die Synchronisierung.</p>}</div></div>
+            <div className="grid min-h-72 place-items-center px-6 text-center"><div><Database size={28} className="mx-auto mb-3 text-slate-700" /><p className="text-sm text-slate-400">Noch keine Daten vorhanden</p></div></div>
           ) : (
             <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-xs text-slate-500"><tr>{Object.keys(rows[0]).slice(0, 6).map((key) => <th key={key} className="px-4 py-3">{key}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-t border-white/[0.05]">{Object.keys(rows[0]).slice(0, 6).map((key) => <td key={key} className="max-w-64 px-4 py-3 text-slate-400">{String(row[key] ?? "—")}</td>)}</tr>)}</tbody></table></div>
           )}
