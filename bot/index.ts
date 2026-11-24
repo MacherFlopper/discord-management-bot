@@ -106,14 +106,23 @@ async function syncGuild(guildId: string) {
   }
   db.prepare("DELETE FROM clan_roles WHERE guild_id = ? AND role_id NOT IN (SELECT id FROM roles WHERE guild_id = ?)").run(guild.id, guild.id);
 
-  for (const member of members?.values() || []) {
-    db.prepare(`
+  if (members) {
+    const saveMember = db.prepare(`
       INSERT INTO members (guild_id, id, username, display_name, avatar, bot, joined_at, roles_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(guild_id, id) DO UPDATE SET username=excluded.username, display_name=excluded.display_name,
-        avatar=excluded.avatar, bot=excluded.bot, joined_at=excluded.joined_at, roles_json=excluded.roles_json
-    `).run(guild.id, member.id, member.user.username, member.displayName, member.user.avatar,
-      member.user.bot ? 1 : 0, member.joinedAt?.toISOString() || null, JSON.stringify([...member.roles.cache.keys()].filter((id) => id !== guild.id)));
+    `);
+    db.exec("BEGIN");
+    try {
+      db.prepare("DELETE FROM members WHERE guild_id = ?").run(guild.id);
+      for (const member of members.values()) {
+        saveMember.run(guild.id, member.id, member.user.username, member.displayName, member.user.avatar,
+          member.user.bot ? 1 : 0, member.joinedAt?.toISOString() || null, JSON.stringify([...member.roles.cache.keys()].filter((id) => id !== guild.id)));
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   addLog(guild.id, "guild_sync", client.user?.id, "Serverdaten synchronisiert");
