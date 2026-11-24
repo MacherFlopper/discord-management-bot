@@ -12,7 +12,8 @@ import { getClanPrices } from "../lib/clan-pricing";
 import { publishPriceAnnouncement } from "../lib/discord-price-announcements";
 import { getDb } from "../lib/db";
 import { ensureSpawnerPrices } from "../lib/spawner-prices";
-import { calculateClanPrice, formatMillions, formatWholeAmount } from "../lib/pricing";
+import { createSpawnerPriceListEmbed } from "../lib/spawner-price-embeds";
+import { calculateClanPrice, formatWholeAmount } from "../lib/pricing";
 import { randomUUID } from "node:crypto";
 
 const token = process.env.DISCORD_TOKEN;
@@ -305,10 +306,7 @@ async function handleClanPricesCommand(interaction: ChatInputCommandInteraction)
 async function handleSpawnerPricesCommand(interaction: ChatInputCommandInteraction) {
   if (!interaction.guildId) throw new Error("Dieser Befehl funktioniert nur auf einem Server.");
   const prices = ensureSpawnerPrices(interaction.guildId);
-  const lines = prices.map((price) =>
-    `${price.emoji} **${price.name}**\nWir kaufen: **${formatMillions(price.buy_price)}**\nWir verkaufen: **${formatMillions(price.sell_price)}**`,
-  );
-  await replyWithPriceEmbeds(interaction, createPriceEmbeds("MRKET CLAN · SPAWNER AN- UND VERKAUF", lines));
+  await interaction.reply({ embeds: [createSpawnerPriceListEmbed(prices)] });
 }
 
 async function announceExpiredClanDiscounts() {

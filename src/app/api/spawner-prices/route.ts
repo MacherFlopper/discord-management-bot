@@ -3,7 +3,8 @@ import { authorizeDashboardRequest } from "../../../../lib/api-auth";
 import { publishPriceAnnouncement } from "../../../../lib/discord-price-announcements";
 import { getDb } from "../../../../lib/db";
 import { ensureSpawnerPrices } from "../../../../lib/spawner-prices";
-import { formatMillions, SPAWNER_DEFAULTS } from "../../../../lib/pricing";
+import { createSpawnerPriceChangeEmbed, createSpawnerPriceListEmbed } from "../../../../lib/spawner-price-embeds";
+import { SPAWNER_DEFAULTS } from "../../../../lib/pricing";
 
 const maxPrice = 1_000_000_000_000;
 
@@ -102,20 +103,17 @@ export async function PATCH(request: Request) {
     throw error;
   }
 
-  const announcement = [
-    `**MRKET CLAN · SPAWNER-PREISÄNDERUNG**`,
-    `${current.emoji} **${current.name}**`,
-    current.buy_price === buyPrice
-      ? `Wir kaufen: **${formatMillions(buyPrice)}**`
-      : `Wir kaufen: ~~${formatMillions(current.buy_price)}~~ → **${formatMillions(buyPrice)}**`,
-    current.sell_price === sellPrice
-      ? `Wir verkaufen: **${formatMillions(sellPrice)}**`
-      : `Wir verkaufen: ~~${formatMillions(current.sell_price)}~~ → **${formatMillions(sellPrice)}**`,
-    `Stand: ${new Date(changedAt).toLocaleString("de-DE", { timeZone: "Europe/Berlin" })}`,
-  ].join("\n");
+  const updatedPrices = ensureSpawnerPrices(guildId);
+  const updatedPrice = updatedPrices.find((price) => price.spawner_key === spawnerKey);
+  if (!updatedPrice) return NextResponse.json({ error: "Spawner nicht gefunden." }, { status: 404 });
 
   try {
-    await publishPriceAnnouncement(settings.channel_id, announcement);
+    await publishPriceAnnouncement(settings.channel_id, {
+      embeds: [
+        createSpawnerPriceChangeEmbed(current, updatedPrice, new Date(changedAt)),
+        createSpawnerPriceListEmbed(updatedPrices, new Date(changedAt)),
+      ],
+    });
   } catch (error) {
     console.error(`Spawnerpreis für ${guildId}/${spawnerKey} gespeichert, Discord-Meldung fehlgeschlagen:`, error);
     return NextResponse.json({
@@ -126,6 +124,6 @@ export async function PATCH(request: Request) {
 
   return NextResponse.json({
     success: true,
-    price: ensureSpawnerPrices(guildId).find((price) => price.spawner_key === spawnerKey),
+    price: updatedPrice,
   });
 }

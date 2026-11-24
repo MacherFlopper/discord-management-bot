@@ -26,7 +26,7 @@ Clan entry prices use the live role-member count: the next place is `member coun
 
 ## Spawner prices
 
-The **Preislisten** dashboard panel starts with the Skelett, Creeper, Eisengolem, Spinne, Blaze, Kuh and Piglin prices from the supplied list. Select a Discord announcement channel before changing prices. Every saved change records the prior and new buy/sell amounts and posts the difference with the previous amount crossed out. Use `/spawnerpreise` to display the current list.
+The **Preislisten** dashboard panel starts with the Skelett, Creeper, Eisengolem, Spinne, Blaze, Kuh and Piglin prices from the supplied list. Select a Discord announcement channel to publish the complete styled **MACHER CLAN** price list with **Preisliste senden**. Price changes post both a before/after comparison and the new complete list. Use `/spawnerpreise` to post the current list publicly in Discord.
 
 ## Ticket panels
 

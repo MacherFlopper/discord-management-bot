@@ -1,4 +1,8 @@
-export async function publishPriceAnnouncement(channelId: string, content: string) {
+import type { APIEmbed } from "discord.js";
+
+type AnnouncementPayload = string | { embeds: APIEmbed[] };
+
+export async function publishPriceAnnouncement(channelId: string, announcement: AnnouncementPayload) {
   const token = process.env.DISCORD_TOKEN;
   if (!token) throw new Error("DISCORD_TOKEN fehlt.");
 
@@ -9,7 +13,7 @@ export async function publishPriceAnnouncement(channelId: string, content: strin
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      content,
+      ...(typeof announcement === "string" ? { content: announcement } : announcement),
       allowed_mentions: { parse: [] },
     }),
     cache: "no-store",

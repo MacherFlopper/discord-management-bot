@@ -69,6 +69,7 @@ export default function PricesPage() {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState("");
   const [savingChannel, setSavingChannel] = useState(false);
+  const [publishingList, setPublishingList] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -149,6 +150,27 @@ export default function PricesPage() {
     }
   }
 
+  async function publishPriceList() {
+    if (!guildId || !announcementChannelId || channelDraftId !== announcementChannelId) return;
+    setPublishingList(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/spawner-prices/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guildId }),
+      });
+      const result = await response.json() as { error?: unknown };
+      if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "Preisliste konnte nicht gesendet werden.");
+      setNotice("Die aktuelle Spawner-Preisliste wurde in Discord veröffentlicht.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Preisliste konnte nicht gesendet werden.");
+    } finally {
+      setPublishingList(false);
+    }
+  }
+
   async function savePrice(price: SpawnerPrice) {
     if (!guildId) return;
     const draft = drafts[price.spawner_key];
@@ -209,15 +231,20 @@ export default function PricesPage() {
           <section className="rounded-2xl border border-white/[0.06] bg-[#11151d] p-5 sm:p-6">
             <div className="mb-4 flex items-center gap-2"><Send size={17} className="text-violet-300" /><h2 className="font-semibold text-white">Discord-Ankündigungen</h2></div>
             <div className="flex flex-col gap-3 sm:flex-row">
-              <select className="h-11 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-[#0b0e14] px-3 text-sm text-slate-100 outline-none focus:border-violet-500/60" value={channelDraftId} onChange={(event) => setChannelDraftId(event.target.value)}>
+              <select className="h-11 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-[#0b0e14] px-3 text-sm text-slate-100 outline-none focus:border-violet-500/60" value={channelDraftId} onChange={(event) => setChannelDraftId(event.target.value)} disabled={savingChannel || publishingList}>
                 <option value="">Channel auswählen</option>
                 {channels.map((channel) => <option key={channel.id} value={channel.id}>#{channel.name}</option>)}
               </select>
-              <button onClick={() => void saveAnnouncementChannel()} disabled={savingChannel || !channelDraftId || channelDraftId === announcementChannelId} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 text-sm font-medium text-white hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">
-                {savingChannel ? <LoaderCircle size={15} className="animate-spin" /> : <Save size={15} />} Channel speichern
-              </button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button onClick={() => void saveAnnouncementChannel()} disabled={savingChannel || publishingList || !channelDraftId || channelDraftId === announcementChannelId} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 text-sm font-medium text-white hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">
+                  {savingChannel ? <LoaderCircle size={15} className="animate-spin" /> : <Save size={15} />} Channel speichern
+                </button>
+                <button onClick={() => void publishPriceList()} disabled={publishingList || savingChannel || !announcementChannelId || channelDraftId !== announcementChannelId} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-violet-400/30 px-4 text-sm font-medium text-violet-200 hover:bg-violet-400/10 disabled:cursor-not-allowed disabled:opacity-50">
+                  {publishingList ? <LoaderCircle size={15} className="animate-spin" /> : <Send size={15} />} Preisliste senden
+                </button>
+              </div>
             </div>
-            <p className="mt-2 text-xs text-slate-500">Der Bot braucht in diesem Channel die Berechtigung, Nachrichten zu senden.</p>
+            <p className="mt-2 text-xs text-slate-500">Du kannst die komplette Liste hier senden. Bei Preisänderungen werden zusätzlich der Preisvergleich und die neue Gesamtliste veröffentlicht.</p>
           </section>
 
           <section className="rounded-2xl border border-white/[0.06] bg-[#11151d]">
